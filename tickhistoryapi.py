@@ -1,253 +1,416 @@
-import pandas as pd
-import numpy as np
-import requests
-import json
-from datetime import datetime
-import shutil
-import os
-import math
-import time
+class TickHistory:
 
-def generateToken(myUsername = '',myPassword = ''):
-    """Generates the token object from Tick History to pair with later calls.
-    """
-    requestUrl = "https://hosted.datascopeapi.reuters.com/RestApi/v1/Authentication/RequestToken"
-    requestHeaders={
-        "Prefer":"respond-async",
-        "Content-Type":"application/json"
-    }
-    requestBody={"Credentials": {"Username": myUsername,"Password": myPassword}}
-    r1 = requests.post(requestUrl, json=requestBody,headers=requestHeaders)
+	def __init__(self, name, pw):
+		self.name = name
+		self.pw = pw
+		self.authenticate()
 
-    if r1.status_code == 200 :
-        jsonResponse = json.loads(r1.text.encode('ascii', 'ignore'))
-        token = jsonResponse["value"]
-        print ('\tSTATUS: Authentication token (valid 24 hours):')
 
-    else:
-        print ('Replace myUserName and myPassword with valid credentials, then repeat the request')
-    return token
+    def all_fields(self,template):
+		"""
+		template: 
+		options available below:
+            'elektron_timeseries'
+            'historical_reference'
+            'intraday_summaries'
+            'time_and_sales'
+            'market_depth'
+		"""
+		from time import sleep
+		import requests
+		
+		def create_url(report):
+			_url = "https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/GetValidContentFieldTypes(ReportTemplateType=ThomsonReuters.Dss.Api.Extractions.ReportTemplates.ReportTemplateTypes"
+			return _url + "'"+ report + "')"
+		
+		_header={
+				"Prefer":"respond-async",
+				"Content-Type":"application/json",
+				"Authorization": "Token " + self.token
+			}
+		
+		if template == 'historical_reference':
+			_url = create_url('HistoricalReference')
+		elif template == 'elektron_timeseries':
+			_url = create_url('ElektronTimeseries')
+		elif template == 'intraday_summaries':
+			_url = create_url('TickHistoryIntradaySummaries')
+		elif template == 'time_and_sales':
+			_url = create_url('TickHistoryTimeAndSales')
+		elif template == 'market_depth':
+			_url = create_url('TickHistoryMarketDepth')
+		else:
+			print("Template Name not found")
+		
+		fields = []
+		resp = requests.get(_url, headers = _header)
+		while resp.status_code != 200:
+			sleep(1)
+			resp = requests.get(_url, headers = _header)
+
+		for i in json.loads(resp.content)['value']:
+			fields.append(i['Name'])
+			return fields
+			
+	def authenticate(self):
+		_header={
+			"Prefer":"respond-async",
+            "Content-Type":"application/json"
+			}
+			
+		_body={"Credentials": {"Username": self.name,"Password": self.pw}}
+        _auth = requests.post("https://hosted.datascopeapi.reuters.com/RestApi/v1/Authentication/RequestToken",json=_body,headers=_header)
+
+        if _auth.status_code != 200:
+			print('issue with the token')
+		else:
+			self.token = json.loads(_auth.text.encode('ascii', 'ignore'))["value"]
+
+	def instruments(self, instrument, start, end, ischain = False):
+		"""
+        instrument: Either a character string for a single RIC or Chain RIC or list of RICs.
+        start: "YYYY-MM-DD" format.
+        end: "YYYY-MM-DD" format.
+        ischain: True or False. is chain activates chain_expand if True.
+		"""
+        self.start = start
+        self.end = end
+        if ischain:
+			self.expand_chain(instrument, start, end)
+		else:
+			if type(instrument) is str:
+				self.rics = [instrument]
+			else:
+				self.rics = instrument
+				
+	
+	def intraday_summaries(self, fields, interval):
+		"""
+        This method should be called for Tick History Intraday Summary Files.
         
-def generateEkTsRequestBody(token, start, end, instruments):
-    requestHeaders={
-        "Prefer":"respond-async",
-        "Content-Type":"application/json",
-        "Authorization": "Token " + token
-    }
-    
-    requestBody={
-        "ExtractionRequest": {
-            "@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.ElektronTimeseriesExtractionRequest",
-            "ContentFieldNames": [
-                "RIC",
-                "Volume",
-                "Trade Date"
-            ],
-            "IdentifierList": {
-                "@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
-                "InstrumentIdentifiers": []
-            },
-            "Condition": {
-                "ReportDateRangeType": "Range",
-                "QueryStartDate": start,
-                "QueryEndDate": end
-            }
-        }
-    }
-    for i in instruments:
-        requestBody["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
-    requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractRaw'
-    return requestUrl,requestHeaders,requestBody
+        fields: A list of field names to be used with this historical reference files.
+        interval:Options are below:
+		'FifteenMinutes'
+		'FiveMinutes'
+		'FiveSeconds'
+		'OneHour'
+		'OneMinute'
+		'OneSecond'
+		'TenMinutes'
+        """
+        
+        if interval in ['FifteenMinutes','FiveMinutes','FiveSeconds','OneHour','OneMinute','OneSecond','TenMinutes']:
+			_header={
+				"Prefer":"respond-async",
+                "Content-Type":"application/json",
+                "Authorization": "Token " + self.token
+			}
 
-def generateEkTsFiles(token, requestUrl,requestHeaders,requestBody, fileName = 'output.csv', filePath = ''):
-    r2 = requests.post(requestUrl, json=requestBody,headers=requestHeaders)
-    status_code = r2.status_code
-    print ("\tSTATUS: HTTP status of the response: " + str(status_code))
-    files = filePath + fileName
-    if status_code == 202:    
-        requestUrl = r2.headers["location"]
-        print ('\tSTATUS: Begin Polling Pickup Location URL')
+			_body={
+				"ExtractionRequest": {
+					"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.TickHistoryIntradaySummariesExtractionRequest",
+					"ContentFieldNames": [],
+					"IdentifierList": {
+						"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
+						"InstrumentIdentifiers": [],
+					},
+					"Condition": {
+						"ReportDateRangeType": "Range",
+						"SummaryInterval": interval,
+						"QueryStartDate": self.start,
+						"QueryEndDate": self.end,
+					}
+				}
+			}
+			
+			for i in fields:
+				_body["ExtractionRequest"]["ContentFieldNames"].append(i)
+			for i in self.rics:
+				_body["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
+			self.requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractRaw'
+            self.requestBody = _body
+            self.requestHeader = _header
+		else:
+			print('error: Interval in Intraday Summaries is incorrect')
 
-        requestHeaders={
-            "Prefer":"respond-async",
+    def elektron_timeseries(self, fields):
+		
+        _header={
+			"Prefer":"respond-async",
             "Content-Type":"application/json",
-            "Authorization":"Token " + token
-        }
-        while (status_code == 202):
-            print ('\tSTATUS: 202; waiting 30 seconds to poll again (need status 200 to continue)')
-            time.sleep(30)
-            r3 = requests.get(requestUrl,headers=requestHeaders)
-            status_code = r3.status_code
+            "Authorization": "Token " + self.token
+			}
 
-        if status_code != 200 :
-            print ('ERROR: An error occurred. Try to run this cell again. If it fails, re-run the previous cell.\n')
+			_body={
+				"ExtractionRequest": {
+					"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.ElektronTimeseriesExtractionRequest",
+					"ContentFieldNames": [],
+					"IdentifierList": {
+						"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
+						"InstrumentIdentifiers": []
+					},
+				"Condition": {
+					"ReportDateRangeType": "Range",
+                    "QueryStartDate": self.start,
+                    "QueryEndDate": self.end
+				}
+			}
+		}
 
-        if status_code == 200:
-            requestUrl = "https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/RawExtractionResults" + "('" + json.loads(r3.content)['JobId'] + "')" + "/$value"
-            requestHeaders={
-                "Prefer":"respond-async",
-                "Content-Type":"text/plain",
-                "Accept-Encoding":"gzip",
-                "X-Direct-Download":"true",
-                "Authorization": "token " + token
-            }
-            returnData = requests.get(requestUrl,headers=requestHeaders,stream=True)
-            if type(returnData.content) is bytes:
-                with open(files, 'wb') as fd:
-                    fd.write(returnData.content)
-            else:
-                print('return object did not resolve to bytes')
-            print('Successfully downloaded file')
-    elif status_code == 200:
-        requestUrl = "https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/RawExtractionResults" + "('" + json.loads(r2.content)['JobId'] + "')" + "/$value"
-        requestHeaders={
-            "Prefer":"respond-async",
-            "Content-Type":"text/plain",
-            "Accept-Encoding":"gzip",
-            "X-Direct-Download":"true",
-            "Authorization": "token " + token
-        }
-        returnData = requests.get(requestUrl,headers=requestHeaders,stream=True)
-        if type(returnData.content) is bytes:
-            with open(files, 'wb') as fd:
-                fd.write(returnData.content)
-        else:
-            print('return object did not resolve to bytes')
-        print('Successfully downloaded file')
+        for i in fields:
+			_body["ExtractionRequest"]["ContentFieldNames"].append(i)
+		for i in self.rics:
+			_body["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
+		self.requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractWithNotes'
+		self.requestBody = _body
+        self.requestHeader = _header
+		
+    def time_and_sales(self, fields):
+		_header={
+			"Prefer":"respond-async",
+			"Content-Type":"application/json",
+            "Authorization": "Token " + self.token
+		}
+		
+		_body={
+			"ExtractionRequest": {
+				"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.TickHistoryTimeAndSalesExtractionRequest",
+				"ContentFieldNames": [],
+				"IdentifierList": {
+					"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
+                    "InstrumentIdentifiers": []
+				},
+                "Condition": {
+					"MessageTimeStampIn": "GmtUtc",
+                    "ReportDateRangeType": "Range",
+                    "QueryStartDate": self.start,
+                    "QueryEndDate": self.end
+				}
+			}
+		}
+        for i in fields:
+			_body["ExtractionRequest"]["ContentFieldNames"].append(i)
+		for i in self.rics:
+			_body["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
+		self.requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractRaw'
+        self.requestBody = _body
+        self.requestHeader = _header'
 
-        
-def chainHistory(tk, chain, start, end):
-    chainURL = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Search/HistoricalChainResolution'
-    chainHeaders = {
-        'Prefer': 'respond-async',
-        'Content-Type': 'application/json',
-        'Authorization': 'Token ' + tk
-    }
+    def raw(self, fields):
+		"""
+		This method should be called for Tick History Raw Files.
+        fields: A list of field names to be used with this historical reference files.
+        """
+        _header={
+			"Prefer":"respond-async",
+			"Content-Type":"application/json",
+            "Authorization": "Token " + self.token
+		}
+        _body={
+			"ExtractionRequest": {
+				"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.TickHistoryRawExtractionRequest",
+                "ContentFieldNames": [],
+                "IdentifierList": {
+					"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
+                    "InstrumentIdentifiers": [],
+                    "ValidationOptions": {"AllowHistoricalInstruments": "true"},
+                    "UseUserPreferencesForValidationOptions": "false"
+				},
+				"Condition": {
+					"ReportDateRangeType": "Range",
+                    "QueryStartDate": self.start,
+                    "QueryEndDate": self.end
+				}
+			}
+		}
+        for i in fields:
+			_body["ExtractionRequest"]["ContentFieldNames"].append(i)
+		for i in self.rics:
+			_body["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
+		self.requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractWithNotes'
+		self.requestBody = _body
+		self.requestHeader = _header
 
-    def bodyGenerator(chain, start, end):
-        return {
-            "Request": {
-                "ChainRics": [
-                    chain
-                ],
-                "Range": {
-                    "Start": start,
-                    "End": end
-                }
-            }
-        }
-    chainBody = bodyGenerator(chain, start, end)
-    chain = requests.post(chainURL, headers = chainHeaders, json= chainBody)
-    data = json.loads(chain.content)
-    for i in data['value']:
-        for p in i['Constituents']:
-            yield p['Identifier']
-
-def generateHisRefRequestBody(token, start, end, instruments):
-    requestHeaders={
-        "Prefer":"respond-async",
-        "Content-Type":"application/json",
-        "Authorization": "Token " + token
-    }
-    
-    requestBody={
-        "ExtractionRequest": {
-            "@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.HistoricalReferenceExtractionRequest",
-            "ContentFieldNames": [
-                "Change Date","Trading Status","RIC", "Put Call Flag","Lot Units","Lot Size","Asset Category","Strike Price","Expiration Date","Exercise Style"
-            ],
-            "IdentifierList": {
-                "@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
-                "InstrumentIdentifiers": [],
-                "ValidationOptions": {"AllowHistoricalInstruments": "true"},
-                "UseUserPreferencesForValidationOptions": "false"
-            },
-            "Condition": {
-                "ReportDateRangeType": "Range",
-                "QueryStartDate": start,
-                "QueryEndDate": end
-            }
-        }
-    }
-    for i in instruments:
-        requestBody["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
-    requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractWithNotes'
-    return requestUrl,requestHeaders,requestBody
-
-def generateHisRefFiles(token, requestUrl,requestHeaders,requestBody, fileName = 'output.csv', filePath = ''):
-    r2 = requests.post(requestUrl, json=requestBody,headers=requestHeaders)
-    status_code = r2.status_code
-    print ("\tSTATUS: HTTP status of the response: " + str(status_code))
-    files = filePath + fileName
-    if status_code == 202:    
-        requestUrl = r2.headers["location"]
-        print ('\tSTATUS: Begin Polling Pickup Location URL')
-
-        requestHeaders={
-            "Prefer":"respond-async",
+    def market_depth(self, fields):
+		print("Note, market depth in this example is delivered as NormalizedLL2 format, there also exist RawMarketByOrder, RawMarketByPrice, RawMarketMaker, and LegacyLevel2")
+		_header={
+			"Prefer":"respond-async",
             "Content-Type":"application/json",
-            "Authorization":"Token " + token
-        }
-        while (status_code == 202):
-            print ('\tSTATUS: 202; waiting 30 seconds to poll again (need status 200 to continue)')
-            time.sleep(30)
-            r3 = requests.get(requestUrl,headers=requestHeaders)
-            status_code = r3.status_code
+            "Authorization": "Token " + self.token
+		}
 
-        if status_code != 200 :
-            print ('ERROR: An error occurred. Try to run this cell again. If it fails, re-run the previous cell.\n')
+        _body={
+			"ExtractionRequest": {
+				"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.TickHistoryMarketDepthExtractionRequest",
+                "ContentFieldNames": [],
+                "IdentifierList": {
+					"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
+                    "InstrumentIdentifiers": []
+				},
+                "Condition": {
+					"View": "NormalizedLL2",
+                    "NumberOfLevels": 10,
+                    "MessageTimeStampIn": "GmtUtc",
+                    "ReportDateRangeType": "Range",
+                    "QueryStartDate": self.start,
+                    "QueryEndDate": self.end
+				}
+			}
+		}
 
-        if status_code == 200:
-            pd.DataFrame(json.loads(r3.content)['Contents']).to_csv(filePath + fileName,index = False)
+        for i in fields:
+			_body["ExtractionRequest"]["ContentFieldNames"].append(i)
+		for i in self.rics:
+			_body["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
+		self.requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractRaw'
+        self.requestBody = _body
+        self.requestHeader = _header
+
+    def export(self, file):
+        import requests
+		from time import sleep
+        import pandas as pd
+
+        _resp = requests.post(self.requestUrl, json=self.requestBody, headers=self.requestHeader)
+        self.status_code = _resp.status_code
+        if self.status_code == 202:
+			_requestUrl = _resp.headers["location"]
+
+            _requestHeaders={
+				"Prefer":"respond-async",
+                "Content-Type":"application/json",
+                "Authorization":"Token " + self.token
+			}
+			while (self.status_code == 202):
+				sleep(30)
+				_return = requests.get(_requestUrl,headers=_requestHeaders)
+				self.status_code = _return.status_code
+
+			if self.status_code != 200 :
+				print('ERROR: An error occurred. Try to run this cell again. If it fails, re-run the previous cell.')
+
+			if self.status_code == 200:
+				pd.DataFrame(json.loads(_return.content)).dropna(how = 'all').to_csv(file,index = False)
+				print('Successfully downloaded file')
+			else:
+				print(_status_code, "- Issue raised")
+		elif self.status_code == 200:
+			pd.DataFrame(json.loads(_return.content)).dropna(how = 'all').to_csv(file,index = False)
             print('Successfully downloaded file')
-    elif status_code == 200:
-        pd.DataFrame(json.loads(r2.content)['Contents']).to_csv(filePath + fileName,index = False)
-        print('Successfully downloaded file')
-
-def trthElektronTimeseries(ident, pw, start, finish, chain, fileRoot = 'pricingOutput', filePath = ''):
-    tk = generateToken(ident,pw)
-    optionConstituents = list(chainHistory(tk,chain,start,finish))
-    delta = (datetime.strptime(finish, '%Y-%m-%d') - datetime.strptime(start, '%Y-%m-%d')).days
-    ric_days = delta * len(optionConstituents)
-    num_rics = math.floor(20000/delta)
-    num_files = math.ceil(len(optionConstituents) / num_rics)
-    beg = 0
-    end = int(num_rics)
-    for i in range(1,num_files+1):
-        ric_set = optionConstituents[beg:end]
-        url,head,body = generateEkTsRequestBody(tk,start,finish, ric_set)
-        generateEkTsFiles(tk,url,head,body, fileName = fileRoot + str(i) +'.csv', filePath= filePath)
-        beg += num_rics
-        end += num_rics
+		else:
+			print('Oh Boy, not sure whats going on in the export command.')
+	
+    def expand_chain(self, chain, start, end):
+        import json
         
-def trthHistoricalReference(ident, pw, start, finish, chain, fileRoot = 'referenceOutput', filePath = ''):
-    tk = generateToken(ident,pw)
-    optionConstituents = list(chainHistory(tk,chain,start,finish))
-    delta = (datetime.strptime(finish, '%Y-%m-%d') - datetime.strptime(start, '%Y-%m-%d')).days    
-    ric_days = delta * len(optionConstituents)
-    num_rics = math.floor(20000/delta)
-    num_files = math.ceil(len(optionConstituents) / num_rics)
-    beg = 0
-    end = int(num_rics)
-    for i in range(1,num_files+1):
-        ric_set = optionConstituents[beg:end]
-        url,head,body = generateHisRefRequestBody(tk,start,finish, ric_set)
-        generateHisRefFiles(tk,url,head,body, fileName = fileRoot + str(i) +'.csv', filePath = filePath)
-        beg += num_rics
-        end += num_rics
+		_header = {"Prefer":"respond-async",
+                "Content-Type":"application/json",
+                "Authorization":"Token " + self.token
+			}
 
-trthHistoricalReference(ident = joshDSSid, 
-             pw = joshDSSpw, 
-             start = '2019-12-01', 
-             finish = '2019-12-04', 
-             chain = '0#CL:', 
-             fileRoot = 'CLreferenceOutput', 
-             filePath = 'C:\\Users\\u6037148\\projects\\')
+		def bodyGenerator(chain, start, end):
+			return {
+				"Request": {
+					"ChainRics": [
+						chain
+						],
+				"Range": {
+					"Start": start,
+					"End": end
+				}
+			}
+		}
 
-trthElektronTimeseries(ident = joshDSSid, 
-             pw = joshDSSpw, 
-             start = '2019-11-25', 
-             finish = '2019-12-02', 
-             chain = '0#AAPL*.U', 
-             fileRoot = 'priceOutput', 
-             filePath = 'C:\\Users\\u6037148\\projects\\')
+        _body = bodyGenerator(chain, start, end)
+        _chain = requests.post('https://hosted.datascopeapi.reuters.com/RestApi/v1/Search/HistoricalChainResolution',
+								headers = _header, 
+								json= _body)
+		_data = json.loads(_chain.content)
+
+		self.rics = []
+        for i in _data['value']:
+			for p in i['Constituents']:
+				self.rics.append(p['Identifier'])
+				
+	def serial_requests(self, template, concurrent_files, directory, file_name, fields, ifintervalsummary = ''):
+		"""
+		This is the post, async call, and download from the TRTH servers.
+		:directory: this is the local path where you will be downloading your files.
+		:template: options available below:
+			'elektron_timeseries'
+			'historical_reference'
+			'intraday_summaries'
+			'time_and_sales'
+			'market_depth'
+		:concurrent_files: should be a number 1-50
+        :directory: file path where the file where be saved.
+        :file_name: name of the output file (extension should not include '.csv')
+        :fields: list of fields for the template of choice
+        :ifintervalsummary: If using the intraday template what is the interval.
+        """
+        from datetime import datetime
+        from math import ceil
+        
+        ric_uni = self.rics.copy()
+        beg = 0
+        num_rics = ceil(len(self.rics)/concurrent_files)
+        end = num_rics
+        for i in range(concurrent_files):
+			self.rics = ric_uni[beg:end]
+            if template == 'historical_reference':
+				self.historical_reference(fields)
+                self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'elektron_timeseries':
+				self.elektron_timeseries(fields)
+                self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'intraday_summaries':
+				self.intraday_summaries(fields, interval = ifintervalsummary)
+                self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'time_and_sales':
+				self.time_and_sales(fields)
+                self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'market_depth':
+				self.market_depth(fields)
+                self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			else:                
+				print("Template Name not found")            
+			beg += num_rics
+            end += num_rics
+            
+            
+    def historical_reference(self, fields):
+		"""
+        This method should be called for Tick History Historical Reference Files.
+                
+		fields: A list of field names to be used with this historical reference files.
+        """
+        _header={
+			"Prefer":"respond-async",
+            "Content-Type":"application/json",
+            "Authorization": "Token " + self.token
+		}
+
+        _body={
+			"ExtractionRequest": {
+				"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.HistoricalReferenceExtractionRequest",
+                "ContentFieldNames": [],
+                "IdentifierList": {
+					"@odata.type": "#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.InstrumentIdentifierList",
+                    "InstrumentIdentifiers": [],
+                    "ValidationOptions": {"AllowHistoricalInstruments": "true"},
+                    "UseUserPreferencesForValidationOptions": "false"
+				},
+                "Condition": {
+					"ReportDateRangeType": "Range",
+                    "QueryStartDate": self.start,
+                    "QueryEndDate": self.end
+				}
+			}
+		}
+        for i in fields:
+			_body["ExtractionRequest"]["ContentFieldNames"].append(i)
+		for i in self.rics:
+			_body["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
+		self.requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractWithNotes'
+        self.requestBody = _body
+        self.requestHeader = _header
