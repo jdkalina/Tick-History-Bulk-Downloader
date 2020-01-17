@@ -353,26 +353,26 @@ class TickHistory:
 		num_rics = ceil(len(self.rics)/concurrent_files)
 		end = num_rics
 		for i in range(concurrent_files):
-				self.rics = ric_uni[beg:end]
-		    if template == 'historical_reference':
-					self.historical_reference(fields)
-			self.async_post(file = directory + file_name + str(i + 1) + '.csv')
-				elif template == 'elektron_timeseries':
-					self.elektron_timeseries(fields)
-			self.async_post(file = directory + file_name + str(i + 1) + '.csv')
-				elif template == 'intraday_summaries':
-					self.intraday_summaries(fields, interval = ifintervalsummary)
-			self.async_post(file = directory + file_name + str(i + 1) + '.csv')
-				elif template == 'time_and_sales':
-					self.time_and_sales(fields)
-			self.async_post(file = directory + file_name + str(i + 1) + '.csv')
-				elif template == 'market_depth':
-					self.market_depth(fields)
-			self.async_post(file = directory + file_name + str(i + 1) + '.csv')
-				else:                
-					print("Template Name not found")            
-				beg += num_rics
-		    end += num_rics
+			self.rics = ric_uni[beg:end]
+		    	if template == 'historical_reference':
+				self.historical_reference(fields)
+				self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'elektron_timeseries':
+				self.elektron_timeseries(fields)
+				self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'intraday_summaries':
+				self.intraday_summaries(fields, interval = ifintervalsummary)
+				self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'time_and_sales':
+				self.time_and_sales(fields)
+				self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			elif template == 'market_depth':
+				self.market_depth(fields)
+				self.async_post(file = directory + file_name + str(i + 1) + '.csv')
+			else:                
+				print("Template Name not found")            
+			beg += num_rics
+			end += num_rics
             
             
 	def historical_reference(self, fields):
