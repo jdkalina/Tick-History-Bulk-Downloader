@@ -192,7 +192,7 @@ class TickHistory:
 			_body["ExtractionRequest"]["IdentifierList"]["InstrumentIdentifiers"].append({"Identifier": i,"IdentifierType": "Ric"})
 		self.requestUrl = 'https://hosted.datascopeapi.reuters.com/RestApi/v1/Extractions/ExtractRaw'
         	self.requestBody = _body
-        	self.requestHeader = _header'
+        	self.requestHeader = _header
 
 	def raw(self, fields):
 		"""
